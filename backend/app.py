@@ -1,202 +1,114 @@
 import os
 import json
 import requests
+from flask import Flask, request, jsonify, render_template
 import pandas as pd
-import xmltodict
-from flask import Flask, render_template, request, jsonify
-from cfenv import AppEnv
+import defusedxml.ElementTree as ET
 
 app = Flask(__name__)
-env = AppEnv()
 
-# Detect environment (Defaults to True for local testing)
-IS_LOCAL = os.getenv("LOCAL_DEV", "true").lower() == "true"
+# ServiceNow API Configuration
+SERVICENOW_INSTANCE = os.getenv("SN_INSTANCE", "your-instance.service-now.com")
+SERVICENOW_USER = os.getenv("SN_USER", "")
+SERVICENOW_PASS = os.getenv("SN_PASSWORD", "")
+SN_API_URL = f"https://{SERVICENOW_INSTANCE}/api/now/table/incident" # Or 'sn_vul_entry' for Vulnerability Response
 
-# Parse SAP BTP Bound Services (when deployed on Cloud Foundry)
-xsuaa_service = env.get_service(name="xsuaa-ticket-portal")
-xsuaa_credentials = xsuaa_service.credentials if xsuaa_service else {}
+def parse_file(file_obj, filename):
+    """Normalizes JSON, XML, or Excel content into a list of vulnerability dicts."""
+    records = []
+    ext = os.path.splitext(filename)[1].lower()
 
-credstore_service = env.get_service(name="credstore-ticket-portal")
-credstore_credentials = credstore_service.credentials if credstore_service else {}
+    if ext == '.json':
+        data = json.load(file_obj)
+        records = data if isinstance(data, list) else data.get('vulnerabilities', [data])
 
-# Configuration Variables
-SN_INSTANCE_URL = os.getenv("SN_INSTANCE_URL", "https://devinstance.service-now.com")
-SN_USER = os.getenv("SN_USER", "admin")
-SN_PASSWORD = os.getenv("SN_PASSWORD", "your_password_here")
-SN_CREDENTIAL_KEY = os.getenv("SN_CREDENTIAL_KEY", "servicenow_api_account")
+    elif ext in ['.xlsx', '.xls']:
+        df = pd.read_excel(file_obj)
+        # Convert NaN values to empty strings for API compatibility
+        records = df.fillna("").to_dict(orient='records')
 
-
-def check_jwt_authorization(req):
-    """Validates SAP BTP SSO JWT token on BTP; automatically bypassed during local development."""
-    if IS_LOCAL:
-        return True, None
-
-    auth_header = req.headers.get("Authorization", None)
-    if not auth_header or not auth_header.startswith("Bearer "):
-        return False, "Missing or invalid authorization header."
-
-    access_token = auth_header.split(" ")[1]
-    try:
-        from sap import xssec
-        security_context = xssec.create_security_context(access_token, xsuaa_credentials)
-        if not security_context.check_scope("$XSAPPNAME.TicketAdmin"):
-            return False, "Forbidden: Insufficient privileges."
-        return True, None
-    except Exception as e:
-        return False, f"Token validation failed: {str(e)}"
-
-
-def get_servicenow_password():
-    """Retrieves ServiceNow API password from SAP Password Vault on Cloud Foundry, or environment variable locally."""
-    if IS_LOCAL or not credstore_credentials:
-        return SN_PASSWORD
-
-    try:
-        url = f"{credstore_credentials.get('url')}/password?name={SN_CREDENTIAL_KEY}"
-        response = requests.get(
-            url,
-            auth=(credstore_credentials.get("username"), credstore_credentials.get("password")),
-            headers={"headers": "application/json"},
-            timeout=10
-        )
-        if response.status_code == 200:
-            return response.json().get("value")
-        raise RuntimeError(f"Vault error: HTTP {response.status_code}")
-    except Exception as e:
-        raise RuntimeError(f"Failed to fetch credentials from Password Vault: {str(e)}")
-
-
-def parse_uploaded_file(file):
-    """Parses uploaded JSON, Excel (.xlsx/.xls), or XML files into a list of dictionaries."""
-    filename = file.filename.lower()
-
-    if filename.endswith(".json"):
-        content = json.load(file)
-        return content if isinstance(content, list) else [content]
-
-    elif filename.endswith((".xlsx", ".xls")):
-        df = pd.read_excel(file)
-        # Convert NaN values to None for clean JSON serialization
-        return df.where(pd.notnull(df), None).to_dict(orient="records")
-
-    elif filename.endswith(".xml"):
-        parsed = xmltodict.parse(file.read())
-        root = list(parsed.values())[0]
-        # Expecting structure like <tickets><ticket>...</ticket></tickets> or <items><item>...</item></items>
-        tickets = root.get("ticket", root.get("item", []))
-        return tickets if isinstance(tickets, list) else [tickets]
-
+    elif ext == '.xml':
+        tree = ET.parse(file_obj)
+        root = tree.getroot()
+        # Expecting repeated item elements (e.g., <vulnerability>...</vulnerability>)
+        for elem in root.findall('.//vulnerability') or root.iter():
+            if elem.tag != root.tag:
+                record = {child.tag: child.text.strip() if child.text else "" for child in elem}
+                if record:
+                    records.append(record)
     else:
-        raise ValueError("Unsupported file format. Please upload a .json, .xlsx, .xls, or .xml file.")
+        raise ValueError(f"Unsupported file format: {ext}")
 
+    return records
 
-def validate_tickets(tickets):
-    """Validates input payload to ensure mandatory fields are present."""
-    errors = []
-    if not isinstance(tickets, list) or len(tickets) == 0:
-        return False, ["Payload must contain at least one valid record."]
+def create_servicenow_ticket(vuln_data):
+    """Sends a single record to ServiceNow API."""
+    headers = {
+        "Content-Type": "application/json",
+        "Accept": "application/json"
+    }
+    
+    # Map input attributes to ServiceNow Table fields
+    payload = {
+        "short_description": f"Vulnerability: {vuln_data.get('title', vuln_data.get('name', 'Security Vulnerability'))}",
+        "description": json.dumps(vuln_data, indent=2),
+        "severity": str(vuln_data.get('severity', '3')),
+        "assignment_group": "Security Response"
+    }
 
-    for idx, ticket in enumerate(tickets, start=1):
-        if not isinstance(ticket, dict):
-            errors.append(f"Row {idx}: Record is not a valid key-value object.")
-            continue
-        if not str(ticket.get("short_description", "")).strip():
-            errors.append(f"Row {idx}: Missing mandatory 'short_description' field.")
+    response = requests.post(
+        SN_API_URL,
+        auth=(SERVICENOW_USER, SERVICENOW_PASS),
+        headers=headers,
+        json=payload,
+        timeout=10
+    )
+    return response
 
-    return len(errors) == 0, errors
+@app.route('/upload', methods=['POST'])
+def upload_file():
+    if 'file' not in request.files:
+        return jsonify({"error": "No file uploaded"}), 400
 
+    file = request.files['file']
+    if file.filename == '':
+        return jsonify({"error": "Empty file name"}), 400
 
-@app.route("/")
-def index():
-    return render_template("index.html")
-
-
-@app.route("/api/tickets", methods=["POST"])
-def process_tickets():
-    # 1. Check Authorization (SSO JWT in BTP, Bypassed Locally)
-    is_authorized, auth_error = check_jwt_authorization(request)
-    if not is_authorized:
-        return jsonify({"success": False, "errors": [auth_error]}), 401
-
-    # 2. Retrieve Credentials (Vault in BTP, ENV Locally)
     try:
-        sn_password = get_servicenow_password()
-    except Exception as err:
-        return jsonify({"success": False, "errors": [str(err)]}), 500
+        records = parse_file(file.stream, file.filename)
+    except Exception as e:
+        return jsonify({"error": f"Failed to parse file: {str(e)}"}), 400
 
-    # 3. Parse Request Payload
-    mode = request.form.get("mode")
-    tickets = []
+    # Sequential processing loop
+    results = {"total": len(records), "created": 0, "failed": 0, "details": []}
 
-    if mode == "single":
-        tickets.append({
-            "short_description": request.form.get("short_description"),
-            "description": request.form.get("description", ""),
-            "urgency": request.form.get("urgency", "3"),
-            "impact": request.form.get("impact", "3"),
-            "category": request.form.get("category", "inquiry")
-        })
-
-    elif mode == "bulk":
-        if "file" not in request.files or not request.files["file"].filename:
-            return jsonify({"success": False, "errors": ["No file uploaded."]}), 400
+    for index, record in enumerate(records):
         try:
-            tickets = parse_uploaded_file(request.files["file"])
-        except Exception as e:
-            return jsonify({"success": False, "errors": [str(e)]}), 400
-
-    else:
-        return jsonify({"success": False, "errors": ["Invalid submission mode."]}), 400
-
-    # 4. Input Schema Validation
-    is_valid, validation_errors = validate_tickets(tickets)
-    if not is_valid:
-        return jsonify({"success": False, "errors": validation_errors}), 422
-
-    # 5. Automated Sequential API Execution to ServiceNow
-    sn_api_url = f"{SN_INSTANCE_URL.rstrip('/')}/api/now/table/incident"
-    results = []
-
-    for idx, ticket in enumerate(tickets, start=1):
-        try:
-            res = requests.post(
-                sn_api_url,
-                auth=(SN_USER, sn_password),
-                json=ticket,
-                headers={"Content-Type": "application/json", "Accept": "application/json"},
-                timeout=15
-            )
-            if res.status_code == 201:
-                data = res.json().get("result", {})
-                results.append({
-                    "row": idx,
-                    "short_description": ticket.get("short_description"),
-                    "status": "SUCCESS",
-                    "ticket_number": data.get("number"),
-                    "sys_id": data.get("sys_id")
+            res = create_servicenow_ticket(record)
+            if res.status_code in [200, 201]:
+                ticket_info = res.json().get('result', {})
+                results["created"] += 1
+                results["details"].append({
+                    "record_index": index,
+                    "status": "success",
+                    "ticket_number": ticket_info.get("number")
                 })
             else:
-                results.append({
-                    "row": idx,
-                    "short_description": ticket.get("short_description"),
-                    "status": "FAILED",
-                    "error": f"HTTP {res.status_code}: {res.text}"
+                results["failed"] += 1
+                results["details"].append({
+                    "record_index": index,
+                    "status": "failed",
+                    "error": res.text
                 })
-        except Exception as ex:
-            results.append({
-                "row": idx,
-                "short_description": ticket.get("short_description"),
-                "status": "FAILED",
-                "error": str(ex)
+        except Exception as err:
+            results["failed"] += 1
+            results["details"].append({
+                "record_index": index,
+                "status": "error",
+                "error": str(err)
             })
 
-    return jsonify({
-        "success": True,
-        "total": len(tickets),
-        "results": results
-    })
+    return jsonify(results), 200
 
-
-if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 8080))
-    app.run(host="0.0.0.0", port=port)
+if __name__ == '__main__':
+    app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 5000)))
