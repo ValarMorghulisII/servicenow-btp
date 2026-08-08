@@ -1,0 +1,20 @@
+{
+  "xsappname": "servicenow-ticket-portal",
+  "tenant-mode": "dedicated",
+  "description": "XSUAA Security Configuration for ServiceNow Ticket Portal",
+  "scopes": [
+    {
+      "name": "$XSAPPNAME.TicketAdmin",
+      "description": "Permission to execute ticket creation requests"
+    }
+  ],
+  "role-templates": [
+    {
+      "name": "TicketAdminRole",
+      "description": "User role to access ticket creation endpoints",
+      "scope-references": [
+        "$XSAPPNAME.TicketAdmin"
+      ]
+    }
+  ]
+}
