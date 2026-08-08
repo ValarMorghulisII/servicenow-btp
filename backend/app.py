@@ -24,11 +24,12 @@ celery_app.conf.update(
 )
 
 
-def load_validation_rules(config_path="validation_rules.yml"):
-    """Loads validation constraints from the YAML configuration file."""
-    if os.path.exists(config_path):
-        with open(config_path, "r") as f:
-            return yaml.safe_load(f).get("rules", {})
+def load_validation_rules():
+    """Loads validation constraints from validation_rules.yml (or validation.yml)."""
+    for config_path in ["validation_rules.yml", "validation.yml"]:
+        if os.path.exists(config_path):
+            with open(config_path, "r") as f:
+                return yaml.safe_load(f).get("rules", {})
     return {}
 
 
@@ -86,7 +87,7 @@ def validate_record_dynamic(record, rules):
 
 
 def get_servicenow_credentials():
-    """Retrieves ServiceNow credentials from Password Vault."""
+    """Retrieves ServiceNow credentials dynamically from Password Vault."""
     if not VAULT_TOKEN:
         raise ValueError("VAULT_TOKEN environment variable is not set.")
 
@@ -220,6 +221,12 @@ def process_vulnerabilities_task(self, records):
 @app.route('/')
 def index():
     return render_template('index.html')
+
+
+@app.route('/rules', methods=['GET'])
+def get_rules():
+    """Returns dynamic validation rules to the frontend UI."""
+    return jsonify(VALIDATION_RULES)
 
 
 @app.route('/upload', methods=['POST'])
