@@ -3,13 +3,14 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Vulnerability Ticket Generation Portal</title>
+    <title>Vulnerability Ingestion Portal</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <style>
         body { background-color: #f4f6f9; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
         .main-card { max-width: 850px; margin: 40px auto; border: none; border-radius: 12px; }
         .progress { height: 22px; border-radius: 11px; }
         .drop-zone { border: 2px dashed #cbd5e1; border-radius: 8px; padding: 25px; text-align: center; background-color: #fff; }
+        .tab-pane { padding-top: 15px; }
     </style>
 </head>
 <body>
@@ -21,44 +22,47 @@
 
         <!-- Active YAML Rules Header -->
         <div class="card bg-light border-0 p-3 mb-4">
-            <h6 class="fw-semibold text-secondary mb-2">Active Validation Rules (Dynamic YAML)</h6>
+            <h6 class="fw-semibold text-secondary mb-2">Active Ingestion Rules (Loaded from YAML)</h6>
             <div id="rulesList" class="d-flex flex-wrap gap-2">
-                <span class="spinner-border spinner-border-sm text-secondary"></span>
-                <span class="text-muted small">Loading active rules...</span>
+                <span class="spinner-border spinner-border-sm text-secondary" role="status"></span>
+                <span class="text-muted small">Loading active constraints...</span>
             </div>
         </div>
 
         <!-- Mode Navigation Tabs -->
-        <ul class="nav nav-tabs mb-4" id="modeTabs">
-            <li class="nav-item">
-                <button class="nav-link active fw-semibold" id="single-tab" data-bs-toggle="tab" data-bs-target="#singlePane">Single Ticket</button>
+        <ul class="nav nav-tabs" id="modeTabs" role="tablist">
+            <li class="nav-item" role="presentation">
+                <button class="nav-link active fw-semibold" id="single-tab" data-bs-toggle="tab" data-bs-target="#singlePane" type="button" role="tab">
+                    Single Ticket
+                </button>
             </li>
-            <li class="nav-item">
-                <button class="nav-link fw-semibold" id="bulk-tab" data-bs-toggle="tab" data-bs-target="#bulkPane">Bulk File Upload</button>
+            <li class="nav-item" role="presentation">
+                <button class="nav-link fw-semibold" id="bulk-tab" data-bs-toggle="tab" data-bs-target="#bulkPane" type="button" role="tab">
+                    Bulk File Upload
+                </button>
             </li>
         </ul>
 
-        <div class="tab-content">
-            <!-- TAB 1: Single Ticket Form -->
-            <div class="tab-pane fade show active" id="singlePane">
+        <div class="tab-content" id="modeTabContent">
+            <!-- TAB 1: Single Ticket Form (Dynamically Populated) -->
+            <div class="tab-pane show active" id="singlePane" role="tabpanel">
                 <form id="singleTicketForm">
-                    <div class="row g-3">
+                    <div id="dynamicFormFields" class="row g-3">
+                        <!-- Default Fallback Form Fields -->
                         <div class="col-md-12">
-                            <label class="form-label fw-medium">Title / Short Description *</label>
-                            <input type="text" name="short_description" class="form-control" placeholder="e.g. Remote Code Execution in Log4j" required>
+                            <label class="form-label fw-medium">Title / Short Description <span class="text-danger">*</span></label>
+                            <input type="text" name="title" class="form-control" placeholder="e.g. Remote Code Execution" required>
                         </div>
-
                         <div class="col-md-6">
-                            <label class="form-label fw-medium">Severity *</label>
+                            <label class="form-label fw-medium">Severity <span class="text-danger">*</span></label>
                             <select name="severity" class="form-select" required>
                                 <option value="">Select Severity...</option>
-                                <option value="Critical">Critical (1)</option>
-                                <option value="High">High (2)</option>
-                                <option value="Medium">Medium (3)</option>
-                                <option value="Low">Low (4)</option>
+                                <option value="Critical">Critical</option>
+                                <option value="High">High</option>
+                                <option value="Medium">Medium</option>
+                                <option value="Low">Low</option>
                             </select>
                         </div>
-
                         <div class="col-md-6">
                             <label class="form-label fw-medium">Priority</label>
                             <select name="priority" class="form-select">
@@ -68,39 +72,34 @@
                                 <option value="4">Low (4)</option>
                             </select>
                         </div>
-
                         <div class="col-md-4">
                             <label class="form-label fw-medium">CVSS Score</label>
                             <input type="text" name="cvss_score" class="form-control" placeholder="e.g. 9.8">
                         </div>
-
                         <div class="col-md-4">
-                            <label class="form-label fw-medium">Line of Business (LOB)</label>
+                            <label class="form-label fw-medium">LOB (Line of Business)</label>
                             <input type="text" name="lob" class="form-control" placeholder="e.g. Retail Banking">
                         </div>
-
                         <div class="col-md-4">
                             <label class="form-label fw-medium">Reportee</label>
-                            <input type="text" name="reportee" class="form-control" placeholder="e.g. john.doe@company.com">
+                            <input type="text" name="reportee" class="form-control" placeholder="e.g. secops@company.com">
                         </div>
-
                         <div class="col-md-12">
                             <label class="form-label fw-medium">Description</label>
-                            <textarea name="description" class="form-control" rows="3" placeholder="Provide vulnerability context and remediation steps..."></textarea>
+                            <textarea name="description" class="form-control" rows="3" placeholder="Provide vulnerability details and remediation path..."></textarea>
                         </div>
-
-                        <div class="col-12 mt-3">
-                            <button type="submit" id="singleSubmitBtn" class="btn btn-primary w-100 fw-semibold">Generate ServiceNow Ticket</button>
-                        </div>
+                    </div>
+                    <div class="mt-4">
+                        <button type="submit" id="singleSubmitBtn" class="btn btn-primary w-100 fw-semibold">Generate ServiceNow Ticket</button>
                     </div>
                 </form>
             </div>
 
             <!-- TAB 2: Bulk File Upload -->
-            <div class="tab-pane fade" id="bulkPane">
+            <div class="tab-pane" id="bulkPane" role="tabpanel">
                 <form id="uploadForm">
                     <div class="drop-zone mb-3">
-                        <label for="scanFile" class="form-label fw-medium text-dark mb-2">Select Scan File (.json, .xml, .xlsx)</label>
+                        <label for="scanFile" class="form-label fw-medium text-dark mb-2">Select Scan Report (.json, .xml, .xlsx)</label>
                         <input class="form-control" type="file" id="scanFile" accept=".json,.xml,.xlsx,.xls" required>
                     </div>
                     <button type="submit" id="submitBtn" class="btn btn-primary w-100 py-2 fw-semibold">Process Bulk Report</button>
@@ -143,33 +142,77 @@
 let pollInterval = null;
 let failedRecordsData = [];
 
-document.addEventListener('DOMContentLoaded', loadValidationRules);
+document.addEventListener('DOMContentLoaded', loadValidationRulesAndBuildForm);
 
-async function loadValidationRules() {
+async function loadValidationRulesAndBuildForm() {
     const rulesList = document.getElementById('rulesList');
     try {
         const response = await fetch('/rules');
+        if (!response.ok) throw new Error("Could not fetch rules");
         const rules = await response.json();
-        rulesList.innerHTML = '';
-
-        for (const [field, config] of Object.entries(rules)) {
-            let details = [];
-            if (config.mandatory) details.push('Required');
-            if (config.min_length) details.push(`Min: ${config.min_length}`);
-            if (config.max_length) details.push(`Max: ${config.max_length}`);
-
-            const badgeClass = config.mandatory ? 'bg-danger-subtle text-danger border-danger-subtle' : 'bg-secondary-subtle text-secondary';
-            const badge = document.createElement('div');
-            badge.className = `border rounded px-2 py-1 small ${badgeClass}`;
-            badge.innerHTML = `<strong>${field}</strong> ${details.length > 0 ? '(' + details.join(', ') + ')' : ''}`;
-            rulesList.appendChild(badge);
+        
+        if (Object.keys(rules).length > 0) {
+            renderRuleBadges(rules);
+            buildDynamicSingleForm(rules);
         }
     } catch (err) {
-        rulesList.innerHTML = `<span class="text-warning small">Using default system validation rules.</span>`;
+        rulesList.innerHTML = `<span class="text-warning small">Using standard form controls.</span>`;
     }
 }
 
-// Single Ticket Submission
+function renderRuleBadges(rules) {
+    const rulesList = document.getElementById('rulesList');
+    rulesList.innerHTML = '';
+
+    for (const [field, config] of Object.entries(rules)) {
+        let details = [];
+        if (config.mandatory) details.push('Required');
+        if (config.min_length) details.push(`Min: ${config.min_length}`);
+        if (config.max_length) details.push(`Max: ${config.max_length}`);
+
+        const badgeClass = config.mandatory ? 'bg-danger-subtle text-danger border-danger-subtle' : 'bg-secondary-subtle text-secondary';
+        const badge = document.createElement('div');
+        badge.className = `border rounded px-2 py-1 small ${badgeClass}`;
+        badge.innerHTML = `<strong>${field}</strong> ${details.length > 0 ? '(' + details.join(', ') + ')' : ''}`;
+        rulesList.appendChild(badge);
+    }
+}
+
+function buildDynamicSingleForm(rules) {
+    const container = document.getElementById('dynamicFormFields');
+    container.innerHTML = ''; // Clear defaults and render strictly according to YAML
+
+    for (const [field, config] of Object.entries(rules)) {
+        const col = document.createElement('div');
+        const isMandatory = config.mandatory ? 'required' : '';
+        const asterisk = config.mandatory ? '<span class="text-danger">*</span>' : '';
+        const labelText = field.replace('_', ' ').toUpperCase();
+
+        if (field === 'description') {
+            col.className = 'col-md-12';
+            col.innerHTML = `
+                <label class="form-label fw-medium">${labelText} ${asterisk}</label>
+                <textarea name="${field}" class="form-control" rows="3" ${isMandatory}></textarea>`;
+        } else if (config.allowed_values) {
+            col.className = 'col-md-6';
+            let options = config.allowed_values.map(v => `<option value="${v}">${v}</option>`).join('');
+            col.innerHTML = `
+                <label class="form-label fw-medium">${labelText} ${asterisk}</label>
+                <select name="${field}" class="form-select" ${isMandatory}>
+                    <option value="">Select ${field}...</option>
+                    ${options}
+                </select>`;
+        } else {
+            col.className = field === 'title' ? 'col-md-12' : 'col-md-4';
+            col.innerHTML = `
+                <label class="form-label fw-medium">${labelText} ${asterisk}</label>
+                <input type="text" name="${field}" class="form-control" ${isMandatory}>`;
+        }
+        container.appendChild(col);
+    }
+}
+
+// Single Ticket Submit Handler
 document.getElementById('singleTicketForm').addEventListener('submit', async (e) => {
     e.preventDefault();
     const btn = document.getElementById('singleSubmitBtn');
@@ -188,9 +231,8 @@ document.getElementById('singleTicketForm').addEventListener('submit', async (e)
 
         if (response.ok) {
             showResults({
-                total: 1, created: 1, failed: 0,
-                title: "Ticket Created Successfully",
-                summary: `ServiceNow Incident Generated: ${data.ticket_number}`
+                title: "Ticket Generated Successfully",
+                summary: `ServiceNow Incident Created: ${data.ticket_number}`
             });
         } else {
             showError(data.error + (data.details ? ": " + JSON.stringify(data.details) : ""));
@@ -202,7 +244,7 @@ document.getElementById('singleTicketForm').addEventListener('submit', async (e)
     }
 });
 
-// Bulk Upload Submission
+// Bulk Report Submit Handler
 document.getElementById('uploadForm').addEventListener('submit', async (e) => {
     e.preventDefault();
     const fileInput = document.getElementById('scanFile');
@@ -224,7 +266,7 @@ document.getElementById('uploadForm').addEventListener('submit', async (e) => {
         if (response.status === 202) {
             pollInterval = setInterval(() => checkStatus(data.task_id), 1000);
         } else {
-            showError(data.error || "Failed to submit upload.");
+            showError(data.error || "Upload submission failed.");
         }
     } catch (err) {
         showError("Network error: " + err.message);
@@ -244,17 +286,16 @@ async function checkStatus(taskId) {
             const res = data.result;
             updateProgressBar(res.total, res.total, res.created, res.failed);
             showResults({
-                total: res.total, created: res.created, failed: res.failed,
                 failed_records: res.failed_records,
-                title: "Processing Completed",
-                summary: `Processed ${res.total} records: ${res.created} created, ${res.failed} failed.`
+                title: "Bulk Ingestion Completed",
+                summary: `Processed ${res.total} items: ${res.created} created, ${res.failed} failed.`
             });
         } else if (data.state === 'FAILURE') {
             clearInterval(pollInterval);
-            showError("Worker task execution failed.");
+            showError("Worker execution error.");
         }
     } catch (err) {
-        console.error("Polling error:", err);
+        console.error("Polling exception:", err);
     }
 }
 
@@ -299,12 +340,12 @@ function showError(message) {
 
 document.getElementById('downloadFailedBtn').addEventListener('click', () => {
     const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(failedRecordsData, null, 2));
-    const downloadAnchor = document.createElement('a');
-    downloadAnchor.setAttribute("href", dataStr);
-    downloadAnchor.setAttribute("download", "failed_vulnerability_records.json");
-    document.body.appendChild(downloadAnchor);
-    downloadAnchor.click();
-    downloadAnchor.remove();
+    const a = document.createElement('a');
+    a.setAttribute("href", dataStr);
+    a.setAttribute("download", "failed_vulnerability_records.json");
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
 });
 </script>
 
