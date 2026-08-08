@@ -51,20 +51,6 @@ Before deploying this codebase to your own SAP BTP space or environment, **you m
 
 ## 📁 Repository Structure
 
-├── approuter/
-│   ├── package.json
-│   └── xs-app.json               # Route definitions and SSO authentication settings
-├── backend/
-│   ├── app.py                    # Flask application and Celery background task logic
-│   ├── Dockerfile                 # Container runtime definition for Web & Worker
-│   ├── requirements.txt          # Python dependencies
-│   ├── validation_rules.yml      # Configurable validation constraints
-│   └── templates/
-│       └── index.html            # Web UI with live progress bar and export features
-├── manifest.yml                  # Cloud Foundry deployment manifest
-├── xs-security.json              # XSUAA security scopes and roles
-├── .cfignore                     # Cloud Foundry upload exclusions
-└── .dockerignore                 # Docker build exclusions
 
 ---
 
@@ -102,5 +88,29 @@ Docker runtime environment and access to a Container Registry.
 
 Provisioned SAP BTP Cloud Foundry space with entitlement for Redis and XSUAA services.
 
-Step 1: Create BTP Services
+**Step 1: Create BTP Services**
 Run the following commands to provision the required backing services in your Cloud Foundry space:
+
+# 1. Create XSUAA service instance
+cf create-service xsuaa application servicenow-xsuaa -c xs-security.json
+
+# 2. Create Redis service instance
+cf create-service p-redis standard servicenow-redis
+
+**Step 2: Build and Push Docker Image**
+Build the Docker image for the Python backend/worker and push it to your registry:
+cd backend
+
+# Build Docker image
+docker build -t <your-docker-registry>/servicenow-backend:latest .
+
+# Push image to registry
+docker push <your-docker-registry>/servicenow-backend:latest
+cd ..
+
+**Step 3: Deploy Applications to Cloud Foundry**
+Deploy the Approuter, Backend API, and Celery Worker using the manifest:
+
+cf push
+
+
