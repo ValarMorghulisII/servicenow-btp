@@ -7,14 +7,33 @@ import defusedxml.ElementTree as ET
 
 app = Flask(__name__)
 
-# ServiceNow API Configuration
-SERVICENOW_INSTANCE = os.getenv("SN_INSTANCE", "your-instance.service-now.com")
-SERVICENOW_USER = os.getenv("SN_USER", "")
-SERVICENOW_PASS = os.getenv("SN_PASSWORD", "")
-SN_API_URL = f"https://{SERVICENOW_INSTANCE}/api/now/table/incident" # Or 'sn_vul_entry' for Vulnerability Response
+# Environment Configuration
+SN_INSTANCE = os.getenv("SN_INSTANCE", "your-instance.service-now.com")
+VAULT_URL = os.getenv("VAULT_URL", "https://vault.yourdomain.com/v1/secret/data/servicenow")
+VAULT_TOKEN = os.getenv("VAULT_TOKEN", "")
+
+def get_servicenow_credentials():
+    """Retrieves ServiceNow API credentials dynamically from Password Vault."""
+    if not VAULT_TOKEN:
+        raise ValueError("VAULT_TOKEN environment variable is not configured.")
+        
+    headers = {"X-Vault-Token": VAULT_TOKEN}
+    response = requests.get(VAULT_URL, headers=headers, timeout=10)
+    response.raise_for_status()
+    
+    # Extract credentials from Vault JSON response
+    vault_data = response.json().get("data", {}).get("data", {})
+    username = vault_data.get("username")
+    password = vault_data.get("password")
+    
+    if not username or not password:
+        raise KeyError("Password Vault response missing 'username' or 'password'.")
+        
+    return username, password
+
 
 def parse_file(file_obj, filename):
-    """Normalizes JSON, XML, or Excel content into a list of vulnerability dicts."""
+    """Normalizes JSON, XML, or Excel scan data into a list of dictionaries."""
     records = []
     ext = os.path.splitext(filename)[1].lower()
 
@@ -24,13 +43,12 @@ def parse_file(file_obj, filename):
 
     elif ext in ['.xlsx', '.xls']:
         df = pd.read_excel(file_obj)
-        # Convert NaN values to empty strings for API compatibility
         records = df.fillna("").to_dict(orient='records')
 
     elif ext == '.xml':
         tree = ET.parse(file_obj)
         root = tree.getroot()
-        # Expecting repeated item elements (e.g., <vulnerability>...</vulnerability>)
+        # Look for vulnerability elements or parse child tags
         for elem in root.findall('.//vulnerability') or root.iter():
             if elem.tag != root.tag:
                 record = {child.tag: child.text.strip() if child.text else "" for child in elem}
@@ -41,50 +59,65 @@ def parse_file(file_obj, filename):
 
     return records
 
-def create_servicenow_ticket(vuln_data):
-    """Sends a single record to ServiceNow API."""
+
+def create_servicenow_ticket(vuln_data, sn_user, sn_pass):
+    """Posts a single vulnerability record to ServiceNow Incident/Vulnerability table."""
+    sn_api_url = f"https://{SN_INSTANCE}/api/now/table/incident"
+    
     headers = {
         "Content-Type": "application/json",
         "Accept": "application/json"
     }
     
-    # Map input attributes to ServiceNow Table fields
     payload = {
-        "short_description": f"Vulnerability: {vuln_data.get('title', vuln_data.get('name', 'Security Vulnerability'))}",
+        "short_description": f"Vulnerability: {vuln_data.get('title', vuln_data.get('name', 'Security Scan Item'))}",
         "description": json.dumps(vuln_data, indent=2),
         "severity": str(vuln_data.get('severity', '3')),
         "assignment_group": "Security Response"
     }
 
     response = requests.post(
-        SN_API_URL,
-        auth=(SERVICENOW_USER, SERVICENOW_PASS),
+        sn_api_url,
+        auth=(sn_user, sn_pass),
         headers=headers,
         json=payload,
         timeout=10
     )
     return response
 
+
+@app.route('/', methods=['GET'])
+def index():
+    return render_template('index.html')
+
+
 @app.route('/upload', methods=['POST'])
 def upload_file():
     if 'file' not in request.files:
-        return jsonify({"error": "No file uploaded"}), 400
+        return jsonify({"error": "No file included in request"}), 400
 
     file = request.files['file']
     if file.filename == '':
-        return jsonify({"error": "Empty file name"}), 400
+        return jsonify({"error": "No selected file"}), 400
 
+    # Parse uploaded file
     try:
         records = parse_file(file.stream, file.filename)
     except Exception as e:
         return jsonify({"error": f"Failed to parse file: {str(e)}"}), 400
 
-    # Sequential processing loop
-    results = {"total": len(records), "created": 0, "failed": 0, "details": []}
+    # Retrieve ServiceNow Credentials from Vault once per batch request
+    try:
+        sn_user, sn_pass = get_servicenow_credentials()
+    except Exception as e:
+        return jsonify({"error": f"Vault authentication failed: {str(e)}"}), 500
 
+    results = {"total_records": len(records), "created": 0, "failed": 0, "details": []}
+
+    # Sequential Loop: Processing 1 record at a time
     for index, record in enumerate(records):
         try:
-            res = create_servicenow_ticket(record)
+            res = create_servicenow_ticket(record, sn_user, sn_pass)
             if res.status_code in [200, 201]:
                 ticket_info = res.json().get('result', {})
                 results["created"] += 1
@@ -110,5 +143,7 @@ def upload_file():
 
     return jsonify(results), 200
 
+
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 5000)))
+    port = int(os.environ.get('PORT', 5000))
+    app.run(host='0.0.0.0', port=port)

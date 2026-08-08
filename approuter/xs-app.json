@@ -11,7 +11,7 @@
       "source": "^/(.*)$",
       "target": "/$1",
       "destination": "backend-api",
-      "authenticationType": "none"
+      "authenticationType": "xsuaa"
     }
   ]
 }

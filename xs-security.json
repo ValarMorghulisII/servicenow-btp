@@ -1,19 +1,19 @@
 {
-  "xsappname": "servicenow-ticket-portal",
+  "xsappname": "servicenow-btp",
   "tenant-mode": "dedicated",
-  "description": "XSUAA Security Configuration for ServiceNow Ticket Portal",
+  "description": "Security configuration for ServiceNow Upload App",
   "scopes": [
     {
-      "name": "$XSAPPNAME.TicketAdmin",
-      "description": "Permission to execute ticket creation requests"
+      "name": "$XSAPPNAME.User",
+      "description": "User scope to access upload portal"
     }
   ],
   "role-templates": [
     {
-      "name": "TicketAdminRole",
-      "description": "User role to access ticket creation endpoints",
+      "name": "UserRoleTemplate",
+      "description": "Role required to access the vulnerability upload tool",
       "scope-references": [
-        "$XSAPPNAME.TicketAdmin"
+        "$XSAPPNAME.User"
       ]
     }
   ]

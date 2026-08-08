@@ -1,6 +1,5 @@
----
 applications:
-  # Approuter Module
+  # Approuter (SSO Gateway)
   - name: servicenow-approuter
     path: approuter
     memory: 128M
@@ -15,8 +14,10 @@ applications:
             "forwardAuthToken": true
           }
         ]
+    services:
+      - servicenow-xsuaa
 
-  # Python Dockerized Backend
+  # Python Dockerized Backend Service
   - name: servicenow-backend
     path: backend
     docker:
@@ -24,5 +25,7 @@ applications:
     memory: 512M
     env:
       SN_INSTANCE: "your-instance.service-now.com"
-      SN_USER: "api_user"
-      SN_PASSWORD: "api_password"
+      VAULT_URL: "https://vault.yourdomain.com/v1/secret/data/servicenow"
+      VAULT_TOKEN: "your-vault-token"
+    services:
+      - servicenow-xsuaa
