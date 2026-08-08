@@ -1,5 +1,6 @@
+---
 applications:
-  # Approuter (SSO Gateway)
+  # Approuter Module (SSO via XSUAA)
   - name: servicenow-approuter
     path: approuter
     memory: 128M
@@ -17,7 +18,7 @@ applications:
     services:
       - servicenow-xsuaa
 
-  # Python Dockerized Backend Service
+  # Python Web API Container
   - name: servicenow-backend
     path: backend
     docker:
@@ -27,5 +28,25 @@ applications:
       SN_INSTANCE: "your-instance.service-now.com"
       VAULT_URL: "https://vault.yourdomain.com/v1/secret/data/servicenow"
       VAULT_TOKEN: "your-vault-token"
+      REDIS_URL: "redis://servicenow-redis:6379/0"
     services:
       - servicenow-xsuaa
+      - servicenow-redis
+
+  # Python Celery Worker Container
+  - name: servicenow-worker
+    path: backend
+    docker:
+      image: <your-docker-registry>/servicenow-backend:latest
+    command: celery -A app.celery_app worker --loglevel=info --concurrency=2
+    memory: 512M
+    no-route: true
+    health-check-type: process
+    env:
+      SN_INSTANCE: "your-instance.service-now.com"
+      VAULT_URL: "https://vault.yourdomain.com/v1/secret/data/servicenow"
+      VAULT_TOKEN: "your-vault-token"
+      REDIS_URL: "redis://servicenow-redis:6379/0"
+    services:
+      - servicenow-xsuaa
+      - servicenow-redis

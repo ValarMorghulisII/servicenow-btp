@@ -1,147 +1,253 @@
 import os
 import json
+import re
 import requests
-from flask import Flask, request, jsonify, render_template
+import yaml
 import pandas as pd
 import defusedxml.ElementTree as ET
+from flask import Flask, request, jsonify, render_template
+from celery import Celery
 
 app = Flask(__name__)
 
 # Environment Configuration
+REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
 SN_INSTANCE = os.getenv("SN_INSTANCE", "your-instance.service-now.com")
 VAULT_URL = os.getenv("VAULT_URL", "https://vault.yourdomain.com/v1/secret/data/servicenow")
 VAULT_TOKEN = os.getenv("VAULT_TOKEN", "")
 
+# Celery Initialization
+celery_app = Celery(app.name, broker=REDIS_URL, backend=REDIS_URL)
+celery_app.conf.update(
+    task_track_started=True,
+    result_extended=True
+)
+
+
+def load_validation_rules(config_path="validation_rules.yml"):
+    """Loads validation constraints from the YAML configuration file."""
+    if os.path.exists(config_path):
+        with open(config_path, "r") as f:
+            return yaml.safe_load(f).get("rules", {})
+    return {}
+
+
+VALIDATION_RULES = load_validation_rules()
+
+
+def validate_record_dynamic(record, rules):
+    """Evaluates a record against dynamic YAML rules. Returns a list of error messages."""
+    errors = []
+
+    for field_name, constraints in rules.items():
+        aliases = constraints.get("aliases", [])
+        possible_keys = [field_name] + aliases
+
+        val = None
+        found_key = None
+        for key in possible_keys:
+            if key in record and record[key] not in [None, ""]:
+                val = str(record[key]).strip()
+                found_key = key
+                break
+
+        # Rule 1: Mandatory Check
+        if constraints.get("mandatory", False) and val is None:
+            field_display = f"'{field_name}'" if not aliases else f"'{field_name}' (or {aliases})"
+            errors.append(f"Missing mandatory field {field_display}")
+            continue
+
+        if val is None:
+            continue
+
+        # Rule 2: Minimum Length Check
+        min_len = constraints.get("min_length")
+        if min_len is not None and len(val) < min_len:
+            errors.append(f"Field '{found_key}' length ({len(val)}) is under minimum ({min_len})")
+
+        # Rule 3: Maximum Length Check
+        max_len = constraints.get("max_length")
+        if max_len is not None and len(val) > max_len:
+            errors.append(f"Field '{found_key}' length ({len(val)}) exceeds maximum ({max_len})")
+
+        # Rule 4: Allowed Values Check
+        allowed = constraints.get("allowed_values")
+        if allowed:
+            allowed_strs = [str(x).lower() for x in allowed]
+            if val.lower() not in allowed_strs:
+                errors.append(f"Field '{found_key}' value '{val}' is not in allowed list {allowed}")
+
+        # Rule 5: Regex Pattern Check
+        pattern = constraints.get("regex_pattern")
+        if pattern and not re.match(pattern, val):
+            errors.append(f"Field '{found_key}' value '{val}' does not match pattern '{pattern}'")
+
+    return errors
+
+
 def get_servicenow_credentials():
-    """Retrieves ServiceNow API credentials dynamically from Password Vault."""
+    """Retrieves ServiceNow credentials from Password Vault."""
     if not VAULT_TOKEN:
-        raise ValueError("VAULT_TOKEN environment variable is not configured.")
-        
+        raise ValueError("VAULT_TOKEN environment variable is not set.")
+
     headers = {"X-Vault-Token": VAULT_TOKEN}
     response = requests.get(VAULT_URL, headers=headers, timeout=10)
     response.raise_for_status()
-    
-    # Extract credentials from Vault JSON response
+
     vault_data = response.json().get("data", {}).get("data", {})
     username = vault_data.get("username")
     password = vault_data.get("password")
-    
+
     if not username or not password:
         raise KeyError("Password Vault response missing 'username' or 'password'.")
-        
+
     return username, password
 
 
 def parse_file(file_obj, filename):
     """Normalizes JSON, XML, or Excel scan data into a list of dictionaries."""
-    records = []
     ext = os.path.splitext(filename)[1].lower()
 
     if ext == '.json':
         data = json.load(file_obj)
-        records = data if isinstance(data, list) else data.get('vulnerabilities', [data])
+        return data if isinstance(data, list) else data.get('vulnerabilities', [data])
 
     elif ext in ['.xlsx', '.xls']:
         df = pd.read_excel(file_obj)
-        records = df.fillna("").to_dict(orient='records')
+        return df.fillna("").to_dict(orient='records')
 
     elif ext == '.xml':
         tree = ET.parse(file_obj)
         root = tree.getroot()
-        # Look for vulnerability elements or parse child tags
+        records = []
         for elem in root.findall('.//vulnerability') or root.iter():
             if elem.tag != root.tag:
-                record = {child.tag: child.text.strip() if child.text else "" for child in elem}
-                if record:
-                    records.append(record)
+                rec = {child.tag: child.text.strip() if child.text else "" for child in elem}
+                if rec:
+                    records.append(rec)
+        return records
+
     else:
         raise ValueError(f"Unsupported file format: {ext}")
 
-    return records
-
 
 def create_servicenow_ticket(vuln_data, sn_user, sn_pass):
-    """Posts a single vulnerability record to ServiceNow Incident/Vulnerability table."""
+    """Posts a single record to the ServiceNow Incident API."""
     sn_api_url = f"https://{SN_INSTANCE}/api/now/table/incident"
-    
     headers = {
         "Content-Type": "application/json",
         "Accept": "application/json"
     }
     
+    title = vuln_data.get('title') or vuln_data.get('name') or vuln_data.get('summary') or 'Security Alert'
     payload = {
-        "short_description": f"Vulnerability: {vuln_data.get('title', vuln_data.get('name', 'Security Scan Item'))}",
+        "short_description": f"Vulnerability: {title}",
         "description": json.dumps(vuln_data, indent=2),
         "severity": str(vuln_data.get('severity', '3')),
         "assignment_group": "Security Response"
     }
 
-    response = requests.post(
+    return requests.post(
         sn_api_url,
         auth=(sn_user, sn_pass),
         headers=headers,
         json=payload,
         timeout=10
     )
-    return response
 
 
-@app.route('/', methods=['GET'])
+@celery_app.task(bind=True)
+def process_vulnerabilities_task(self, records):
+    """Background task processing vulnerability records sequentially."""
+    try:
+        sn_user, sn_pass = get_servicenow_credentials()
+    except Exception as e:
+        return {"status": "Error", "message": f"Vault authentication failed: {str(e)}"}
+
+    total = len(records)
+    created, failed = 0, 0
+    successful_tickets = []
+    failed_records = []
+
+    for index, record in enumerate(records):
+        # Perform dynamic YAML rule validation
+        validation_errors = validate_record_dynamic(record, VALIDATION_RULES)
+
+        if validation_errors:
+            failed += 1
+            bad_record = dict(record)
+            bad_record["_failure_reason"] = "Validation Error: " + "; ".join(validation_errors)
+            failed_records.append(bad_record)
+        else:
+            try:
+                res = create_servicenow_ticket(record, sn_user, sn_pass)
+                if res.status_code in [200, 201]:
+                    ticket_number = res.json().get('result', {}).get('number')
+                    created += 1
+                    successful_tickets.append({"record_index": index, "ticket_number": ticket_number})
+                else:
+                    failed += 1
+                    bad_record = dict(record)
+                    bad_record["_failure_reason"] = f"ServiceNow API Error ({res.status_code}): {res.text}"
+                    failed_records.append(bad_record)
+            except Exception as err:
+                failed += 1
+                bad_record = dict(record)
+                bad_record["_failure_reason"] = f"Execution Exception: {str(err)}"
+                failed_records.append(bad_record)
+
+        # Broadcast live progress updates to Redis
+        self.update_state(
+            state='PROGRESS',
+            meta={
+                'current': index + 1,
+                'total': total,
+                'created': created,
+                'failed': failed
+            }
+        )
+
+    return {
+        'status': 'Completed',
+        'total': total,
+        'created': created,
+        'failed': failed,
+        'successful_tickets': successful_tickets,
+        'failed_records': failed_records
+    }
+
+
+@app.route('/')
 def index():
     return render_template('index.html')
 
 
 @app.route('/upload', methods=['POST'])
 def upload_file():
-    if 'file' not in request.files:
-        return jsonify({"error": "No file included in request"}), 400
+    if 'file' not in request.files or request.files['file'].filename == '':
+        return jsonify({"error": "No valid file uploaded"}), 400
 
     file = request.files['file']
-    if file.filename == '':
-        return jsonify({"error": "No selected file"}), 400
-
-    # Parse uploaded file
     try:
         records = parse_file(file.stream, file.filename)
     except Exception as e:
-        return jsonify({"error": f"Failed to parse file: {str(e)}"}), 400
+        return jsonify({"error": f"Parse error: {str(e)}"}), 400
 
-    # Retrieve ServiceNow Credentials from Vault once per batch request
-    try:
-        sn_user, sn_pass = get_servicenow_credentials()
-    except Exception as e:
-        return jsonify({"error": f"Vault authentication failed: {str(e)}"}), 500
+    task = process_vulnerabilities_task.apply_async(args=[records])
+    return jsonify({"task_id": task.id, "total_records": len(records)}), 202
 
-    results = {"total_records": len(records), "created": 0, "failed": 0, "details": []}
 
-    # Sequential Loop: Processing 1 record at a time
-    for index, record in enumerate(records):
-        try:
-            res = create_servicenow_ticket(record, sn_user, sn_pass)
-            if res.status_code in [200, 201]:
-                ticket_info = res.json().get('result', {})
-                results["created"] += 1
-                results["details"].append({
-                    "record_index": index,
-                    "status": "success",
-                    "ticket_number": ticket_info.get("number")
-                })
-            else:
-                results["failed"] += 1
-                results["details"].append({
-                    "record_index": index,
-                    "status": "failed",
-                    "error": res.text
-                })
-        except Exception as err:
-            results["failed"] += 1
-            results["details"].append({
-                "record_index": index,
-                "status": "error",
-                "error": str(err)
-            })
-
-    return jsonify(results), 200
+@app.route('/status/<task_id>')
+def task_status(task_id):
+    task = process_vulnerabilities_task.AsyncResult(task_id)
+    if task.state == 'PENDING':
+        return jsonify({"state": task.state, "status": "Task Queued"})
+    elif task.state == 'PROGRESS':
+        return jsonify({"state": task.state, "meta": task.info})
+    elif task.state == 'SUCCESS':
+        return jsonify({"state": task.state, "result": task.info})
+    else:
+        return jsonify({"state": task.state, "status": str(task.info)})
 
 
 if __name__ == '__main__':

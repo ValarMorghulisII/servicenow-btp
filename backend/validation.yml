@@ -1,0 +1,19 @@
+rules:
+  title:
+    mandatory: true
+    min_length: 3
+    max_length: 100
+    aliases: ["name", "vulnerability_name", "summary"]
+
+  severity:
+    mandatory: true
+    allowed_values: ["1", "2", "3", "4", "5", "Low", "Medium", "High", "Critical"]
+
+  description:
+    mandatory: false
+    max_length: 2000
+
+  cve_id:
+    mandatory: false
+    max_length: 20
+    regex_pattern: "^CVE-\\d{4}-\\d{4,}$"
