@@ -133,18 +133,38 @@ def parse_file(file_obj, filename):
 
 
 def create_servicenow_ticket(vuln_data, sn_user, sn_pass):
-    """Posts a single record to the ServiceNow Incident API."""
+    """Posts a record to the ServiceNow Incident API with all requested fields."""
     sn_api_url = f"https://{SN_INSTANCE}/api/now/table/incident"
     headers = {
         "Content-Type": "application/json",
         "Accept": "application/json"
     }
     
-    title = vuln_data.get('title') or vuln_data.get('name') or vuln_data.get('summary') or 'Security Alert'
+    title = (vuln_data.get('short_description') or vuln_data.get('title') or 
+             vuln_data.get('name') or vuln_data.get('summary') or 'Security Alert')
+    
+    base_desc = vuln_data.get('description', '')
+    cvss = vuln_data.get('cvss_score', '')
+    lob = vuln_data.get('lob') or vuln_data.get('line_of_business', '')
+    reportee = vuln_data.get('reportee') or vuln_data.get('reporter', '')
+
+    # Format extended fields into description body
+    description_body = (
+        f"{base_desc}\n\n"
+        f"--- Metadata ---\n"
+        f"CVSS Score: {cvss}\n"
+        f"LOB: {lob}\n"
+        f"Reportee: {reportee}"
+    ).strip()
+
     payload = {
         "short_description": f"Vulnerability: {title}",
-        "description": json.dumps(vuln_data, indent=2),
+        "description": description_body,
         "severity": str(vuln_data.get('severity', '3')),
+        "priority": str(vuln_data.get('priority', '3')),
+        "u_cvss_score": str(cvss),
+        "u_lob": str(lob),
+        "u_reportee": str(reportee),
         "assignment_group": "Security Response"
     }
 
@@ -171,7 +191,6 @@ def process_vulnerabilities_task(self, records):
     failed_records = []
 
     for index, record in enumerate(records):
-        # Perform dynamic YAML rule validation
         validation_errors = validate_record_dynamic(record, VALIDATION_RULES)
 
         if validation_errors:
@@ -197,7 +216,6 @@ def process_vulnerabilities_task(self, records):
                 bad_record["_failure_reason"] = f"Execution Exception: {str(err)}"
                 failed_records.append(bad_record)
 
-        # Broadcast live progress updates to Redis
         self.update_state(
             state='PROGRESS',
             meta={
@@ -227,6 +245,35 @@ def index():
 def get_rules():
     """Returns dynamic validation rules to the frontend UI."""
     return jsonify(VALIDATION_RULES)
+
+
+@app.route('/create-ticket', methods=['POST'])
+def create_single_ticket():
+    """Handles single ticket generation from the UI form."""
+    record = request.get_json() if request.is_json else request.form.to_dict()
+
+    if not record:
+        return jsonify({"error": "No payload submitted"}), 400
+
+    # Validate against dynamic rules
+    validation_errors = validate_record_dynamic(record, VALIDATION_RULES)
+    if validation_errors:
+        return jsonify({"error": "Validation Error", "details": validation_errors}), 400
+
+    try:
+        sn_user, sn_pass = get_servicenow_credentials()
+        res = create_servicenow_ticket(record, sn_user, sn_pass)
+        if res.status_code in [200, 201]:
+            ticket_info = res.json().get('result', {})
+            return jsonify({
+                "message": "Ticket created successfully",
+                "ticket_number": ticket_info.get("number"),
+                "sys_id": ticket_info.get("sys_id")
+            }), 201
+        else:
+            return jsonify({"error": f"ServiceNow API Error ({res.status_code})", "details": res.text}), 500
+    except Exception as err:
+        return jsonify({"error": f"Execution Exception: {str(err)}"}), 500
 
 
 @app.route('/upload', methods=['POST'])

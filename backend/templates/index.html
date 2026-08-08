@@ -3,148 +3,206 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Vulnerability Scan Ingestion Portal</title>
+    <title>Vulnerability Ticket Generation Portal</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <style>
-        body {
-            background-color: #f4f6f9;
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-        }
-        .main-card {
-            max-width: 800px;
-            margin: 40px auto;
-            border: none;
-            border-radius: 12px;
-        }
-        .rule-badge {
-            font-size: 0.8rem;
-            margin-right: 4px;
-        }
-        .progress {
-            height: 22px;
-            border-radius: 11px;
-        }
-        .drop-zone {
-            border: 2px dashed #cbd5e1;
-            border-radius: 8px;
-            padding: 30px;
-            text-align: center;
-            background-color: #ffffff;
-            transition: border-color 0.2s;
-        }
-        .drop-zone:hover {
-            border-color: #3b82f6;
-        }
+        body { background-color: #f4f6f9; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+        .main-card { max-width: 850px; margin: 40px auto; border: none; border-radius: 12px; }
+        .progress { height: 22px; border-radius: 11px; }
+        .drop-zone { border: 2px dashed #cbd5e1; border-radius: 8px; padding: 25px; text-align: center; background-color: #fff; }
     </style>
 </head>
 <body>
 
 <div class="container">
     <div class="card main-card shadow-sm p-4">
-        <h3 class="fw-bold text-dark mb-1">Vulnerability Incident Portal</h3>
-        <p class="text-secondary small mb-4">
-            Upload repository scan reports (JSON, XML, XLSX) to generate ServiceNow incident tickets.
-        </p>
+        <h3 class="fw-bold text-dark mb-1">Vulnerability Ticket Generator</h3>
+        <p class="text-secondary small mb-4">Generate ServiceNow incident tickets individually or via bulk scan reports.</p>
 
-        <!-- Dynamic Validation Rules Display -->
-        <div class="card bg-light border-0 p-3 mb-4" id="rulesCard">
-            <h6 class="fw-semibold text-secondary mb-2">Active Ingestion Rules (Loaded from YAML)</h6>
+        <!-- Active YAML Rules Header -->
+        <div class="card bg-light border-0 p-3 mb-4">
+            <h6 class="fw-semibold text-secondary mb-2">Active Validation Rules (Dynamic YAML)</h6>
             <div id="rulesList" class="d-flex flex-wrap gap-2">
-                <span class="spinner-border spinner-border-sm text-secondary" role="status"></span>
-                <span class="text-muted small">Loading validation rules...</span>
+                <span class="spinner-border spinner-border-sm text-secondary"></span>
+                <span class="text-muted small">Loading active rules...</span>
             </div>
         </div>
 
-        <!-- File Upload Form -->
-        <form id="uploadForm">
-            <div class="drop-zone mb-3">
-                <label for="scanFile" class="form-label fw-medium text-dark mb-2">
-                    Select or Drag Scan File (.json, .xml, .xlsx)
-                </label>
-                <input class="form-control" type="file" id="scanFile" accept=".json,.xml,.xlsx,.xls" required>
-            </div>
-            <button type="submit" id="submitBtn" class="btn btn-primary w-100 py-2 fw-semibold">
-                Submit & Process Tickets
-            </button>
-        </form>
+        <!-- Mode Navigation Tabs -->
+        <ul class="nav nav-tabs mb-4" id="modeTabs">
+            <li class="nav-item">
+                <button class="nav-link active fw-semibold" id="single-tab" data-bs-toggle="tab" data-bs-target="#singlePane">Single Ticket</button>
+            </li>
+            <li class="nav-item">
+                <button class="nav-link fw-semibold" id="bulk-tab" data-bs-toggle="tab" data-bs-target="#bulkPane">Bulk File Upload</button>
+            </li>
+        </ul>
 
-        <!-- Live Progress Indicator -->
-        <div id="progressContainer" class="d-none mt-4">
-            <div class="d-flex justify-content-between align-items-center mb-1">
-                <span class="fw-semibold text-secondary small">Processing ServiceNow Tickets...</span>
-                <span id="percentText" class="fw-bold text-primary small">0%</span>
+        <div class="tab-content">
+            <!-- TAB 1: Single Ticket Form -->
+            <div class="tab-pane fade show active" id="singlePane">
+                <form id="singleTicketForm">
+                    <div class="row g-3">
+                        <div class="col-md-12">
+                            <label class="form-label fw-medium">Title / Short Description *</label>
+                            <input type="text" name="short_description" class="form-control" placeholder="e.g. Remote Code Execution in Log4j" required>
+                        </div>
+
+                        <div class="col-md-6">
+                            <label class="form-label fw-medium">Severity *</label>
+                            <select name="severity" class="form-select" required>
+                                <option value="">Select Severity...</option>
+                                <option value="Critical">Critical (1)</option>
+                                <option value="High">High (2)</option>
+                                <option value="Medium">Medium (3)</option>
+                                <option value="Low">Low (4)</option>
+                            </select>
+                        </div>
+
+                        <div class="col-md-6">
+                            <label class="form-label fw-medium">Priority</label>
+                            <select name="priority" class="form-select">
+                                <option value="3">Medium (3)</option>
+                                <option value="1">Critical (1)</option>
+                                <option value="2">High (2)</option>
+                                <option value="4">Low (4)</option>
+                            </select>
+                        </div>
+
+                        <div class="col-md-4">
+                            <label class="form-label fw-medium">CVSS Score</label>
+                            <input type="text" name="cvss_score" class="form-control" placeholder="e.g. 9.8">
+                        </div>
+
+                        <div class="col-md-4">
+                            <label class="form-label fw-medium">Line of Business (LOB)</label>
+                            <input type="text" name="lob" class="form-control" placeholder="e.g. Retail Banking">
+                        </div>
+
+                        <div class="col-md-4">
+                            <label class="form-label fw-medium">Reportee</label>
+                            <input type="text" name="reportee" class="form-control" placeholder="e.g. john.doe@company.com">
+                        </div>
+
+                        <div class="col-md-12">
+                            <label class="form-label fw-medium">Description</label>
+                            <textarea name="description" class="form-control" rows="3" placeholder="Provide vulnerability context and remediation steps..."></textarea>
+                        </div>
+
+                        <div class="col-12 mt-3">
+                            <button type="submit" id="singleSubmitBtn" class="btn btn-primary w-100 fw-semibold">Generate ServiceNow Ticket</button>
+                        </div>
+                    </div>
+                </form>
             </div>
-            <div class="progress mb-3">
-                <div id="progressBar" class="progress-bar progress-bar-striped progress-bar-animated bg-primary" 
-                     role="progressbar" style="width: 0%;"></div>
-            </div>
-            <div class="row text-center text-muted small bg-light py-2 rounded">
-                <div class="col-4">Progress: <strong id="currentCount" class="text-dark">0</strong>/<span id="totalCount">0</span></div>
-                <div class="col-4">Created: <strong id="createdCount" class="text-success">0</strong></div>
-                <div class="col-4">Failed: <strong id="failedCount" class="text-danger">0</strong></div>
+
+            <!-- TAB 2: Bulk File Upload -->
+            <div class="tab-pane fade" id="bulkPane">
+                <form id="uploadForm">
+                    <div class="drop-zone mb-3">
+                        <label for="scanFile" class="form-label fw-medium text-dark mb-2">Select Scan File (.json, .xml, .xlsx)</label>
+                        <input class="form-control" type="file" id="scanFile" accept=".json,.xml,.xlsx,.xls" required>
+                    </div>
+                    <button type="submit" id="submitBtn" class="btn btn-primary w-100 py-2 fw-semibold">Process Bulk Report</button>
+                </form>
+
+                <!-- Live Progress Bar -->
+                <div id="progressContainer" class="d-none mt-4">
+                    <div class="d-flex justify-content-between align-items-center mb-1">
+                        <span class="fw-semibold text-secondary small">Processing ServiceNow Tickets...</span>
+                        <span id="percentText" class="fw-bold text-primary small">0%</span>
+                    </div>
+                    <div class="progress mb-3">
+                        <div id="progressBar" class="progress-bar progress-bar-striped progress-bar-animated bg-primary" role="progressbar" style="width: 0%;"></div>
+                    </div>
+                    <div class="row text-center text-muted small bg-light py-2 rounded">
+                        <div class="col-4">Progress: <strong id="currentCount">0</strong>/<span id="totalCount">0</span></div>
+                        <div class="col-4">Created: <strong id="createdCount" class="text-success">0</strong></div>
+                        <div class="col-4">Failed: <strong id="failedCount" class="text-danger">0</strong></div>
+                    </div>
+                </div>
             </div>
         </div>
 
-        <!-- Completion / Error Dashboard -->
+        <!-- Completion Dashboard -->
         <div id="resultsContainer" class="d-none alert mt-4">
             <h5 id="resultTitle" class="alert-heading fw-bold"></h5>
             <p id="resultSummary" class="mb-2"></p>
             
             <div id="failedSection" class="d-none mt-3 border-top pt-3">
-                <p class="small text-muted mb-2">
-                    Some records failed validation or API processing. You can download the non-compliant records containing diagnostic error details.
-                </p>
-                <button id="downloadFailedBtn" class="btn btn-outline-danger btn-sm fw-semibold">
-                    Download Failed Records (_failure_reason.json)
-                </button>
+                <p class="small text-muted mb-2">Download non-compliant records containing specific validation or API error reasons.</p>
+                <button id="downloadFailedBtn" class="btn btn-outline-danger btn-sm fw-semibold">Download Failed Records (_failure_reason.json)</button>
             </div>
         </div>
 
     </div>
 </div>
 
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 <script>
 let pollInterval = null;
 let failedRecordsData = [];
 
-// Fetch dynamic validation constraints on page load
 document.addEventListener('DOMContentLoaded', loadValidationRules);
 
 async function loadValidationRules() {
     const rulesList = document.getElementById('rulesList');
     try {
         const response = await fetch('/rules');
-        if (!response.ok) throw new Error("Failed to load rules");
-        
         const rules = await response.json();
         rulesList.innerHTML = '';
-
-        if (Object.keys(rules).length === 0) {
-            rulesList.innerHTML = '<span class="text-muted small">No specific constraints defined.</span>';
-            return;
-        }
 
         for (const [field, config] of Object.entries(rules)) {
             let details = [];
             if (config.mandatory) details.push('Required');
             if (config.min_length) details.push(`Min: ${config.min_length}`);
             if (config.max_length) details.push(`Max: ${config.max_length}`);
-            if (config.allowed_values) details.push(`Values: [${config.allowed_values.join(', ')}]`);
 
-            const isRequired = config.mandatory;
-            const badgeClass = isRequired ? 'bg-danger-subtle text-danger border-danger-subtle' : 'bg-secondary-subtle text-secondary';
-            
+            const badgeClass = config.mandatory ? 'bg-danger-subtle text-danger border-danger-subtle' : 'bg-secondary-subtle text-secondary';
             const badge = document.createElement('div');
             badge.className = `border rounded px-2 py-1 small ${badgeClass}`;
             badge.innerHTML = `<strong>${field}</strong> ${details.length > 0 ? '(' + details.join(', ') + ')' : ''}`;
             rulesList.appendChild(badge);
         }
     } catch (err) {
-        rulesList.innerHTML = `<span class="text-warning small">Could not retrieve rule metadata. Default validation applies.</span>`;
+        rulesList.innerHTML = `<span class="text-warning small">Using default system validation rules.</span>`;
     }
 }
 
-// Upload Submission Handler
+// Single Ticket Submission
+document.getElementById('singleTicketForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const btn = document.getElementById('singleSubmitBtn');
+    btn.disabled = true;
+
+    const formData = new FormData(e.target);
+    const payload = Object.fromEntries(formData.entries());
+
+    try {
+        const response = await fetch('/create-ticket', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
+        const data = await response.json();
+
+        if (response.ok) {
+            showResults({
+                total: 1, created: 1, failed: 0,
+                title: "Ticket Created Successfully",
+                summary: `ServiceNow Incident Generated: ${data.ticket_number}`
+            });
+        } else {
+            showError(data.error + (data.details ? ": " + JSON.stringify(data.details) : ""));
+        }
+    } catch (err) {
+        showError("Network exception: " + err.message);
+    } finally {
+        btn.disabled = false;
+    }
+});
+
+// Bulk Upload Submission
 document.getElementById('uploadForm').addEventListener('submit', async (e) => {
     e.preventDefault();
     const fileInput = document.getElementById('scanFile');
@@ -153,7 +211,6 @@ document.getElementById('uploadForm').addEventListener('submit', async (e) => {
     const formData = new FormData();
     formData.append('file', fileInput.files[0]);
 
-    // Reset UI State
     document.getElementById('submitBtn').disabled = true;
     document.getElementById('progressContainer').classList.remove('d-none');
     document.getElementById('resultsContainer').classList.add('d-none');
@@ -167,10 +224,10 @@ document.getElementById('uploadForm').addEventListener('submit', async (e) => {
         if (response.status === 202) {
             pollInterval = setInterval(() => checkStatus(data.task_id), 1000);
         } else {
-            showError(data.error || "Failed to submit upload request.");
+            showError(data.error || "Failed to submit upload.");
         }
     } catch (err) {
-        showError("Network exception: " + err.message);
+        showError("Network error: " + err.message);
     }
 });
 
@@ -182,16 +239,19 @@ async function checkStatus(taskId) {
         if (data.state === 'PROGRESS') {
             const meta = data.meta;
             updateProgressBar(meta.current, meta.total, meta.created, meta.failed);
-        } 
-        else if (data.state === 'SUCCESS') {
+        } else if (data.state === 'SUCCESS') {
             clearInterval(pollInterval);
             const res = data.result;
             updateProgressBar(res.total, res.total, res.created, res.failed);
-            showResults(res);
-        } 
-        else if (data.state === 'FAILURE') {
+            showResults({
+                total: res.total, created: res.created, failed: res.failed,
+                failed_records: res.failed_records,
+                title: "Processing Completed",
+                summary: `Processed ${res.total} records: ${res.created} created, ${res.failed} failed.`
+            });
+        } else if (data.state === 'FAILURE') {
             clearInterval(pollInterval);
-            showError("Task processing failed on worker node.");
+            showError("Worker task execution failed.");
         }
     } catch (err) {
         console.error("Polling error:", err);
@@ -210,18 +270,17 @@ function updateProgressBar(current, total, created, failed) {
     document.getElementById('failedCount').innerText = failed;
 }
 
-function showResults(result) {
+function showResults(res) {
     document.getElementById('submitBtn').disabled = false;
-    const resultsContainer = document.getElementById('resultsContainer');
-    resultsContainer.classList.remove('d-none', 'alert-danger');
-    resultsContainer.classList.add('alert-success');
+    const container = document.getElementById('resultsContainer');
+    container.classList.remove('d-none', 'alert-danger');
+    container.classList.add('alert-success');
 
-    document.getElementById('resultTitle').innerText = "Processing Completed";
-    document.getElementById('resultSummary').innerText = 
-        `Processed ${result.total} records: ${result.created} tickets generated successfully in ServiceNow, ${result.failed} records failed validation or creation.`;
+    document.getElementById('resultTitle').innerText = res.title || "Success";
+    document.getElementById('resultSummary').innerText = res.summary;
 
-    if (result.failed > 0) {
-        failedRecordsData = result.failed_records;
+    if (res.failed_records && res.failed_records.length > 0) {
+        failedRecordsData = res.failed_records;
         document.getElementById('failedSection').classList.remove('d-none');
     }
 }
@@ -230,15 +289,14 @@ function showError(message) {
     document.getElementById('submitBtn').disabled = false;
     document.getElementById('progressContainer').classList.add('d-none');
     
-    const resultsContainer = document.getElementById('resultsContainer');
-    resultsContainer.classList.remove('d-none', 'alert-success');
-    resultsContainer.classList.add('alert-danger');
+    const container = document.getElementById('resultsContainer');
+    container.classList.remove('d-none', 'alert-success');
+    container.classList.add('alert-danger');
     
     document.getElementById('resultTitle').innerText = "Processing Error";
     document.getElementById('resultSummary').innerText = message;
 }
 
-// Download Failed Records JSON
 document.getElementById('downloadFailedBtn').addEventListener('click', () => {
     const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(failedRecordsData, null, 2));
     const downloadAnchor = document.createElement('a');
