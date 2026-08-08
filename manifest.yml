@@ -1,34 +1,28 @@
 ---
-version: 1
 applications:
-- name: servicenow-backend
-  path: ./backend
-  memory: 512M
-  disk_quota: 1024M
-  docker:
-    image: docker.io/<your-dockerhub-username>/servicenow-backend:1.0.0
-  routes:
-    - route: servicenow-backend.cfapps.<region>.hana.ondemand.com
-  services:
-    - xsuaa-ticket-portal
-    - credstore-ticket-portal
-  env:
-    SN_INSTANCE_URL: "https://devinstance.service-now.com"
-    SN_CREDENTIAL_KEY: "servicenow_api_account"
+  # Approuter Module
+  - name: servicenow-approuter
+    path: approuter
+    memory: 128M
+    buildpacks:
+      - nodejs_buildpack
+    env:
+      destinations: >
+        [
+          {
+            "name": "backend-api",
+            "url": "https://servicenow-backend.cfapps.<region>.hana.ondemand.com",
+            "forwardAuthToken": true
+          }
+        ]
 
-- name: servicenow-approuter
-  path: ./approuter
-  memory: 256M
-  routes:
-    - route: servicenow-portal.cfapps.<region>.hana.ondemand.com
-  services:
-    - xsuaa-ticket-portal
-  env:
-    destinations: >
-      [
-        {
-          "name": "backend-api",
-          "url": "https://servicenow-backend.cfapps.<region>.hana.ondemand.com",
-          "forwardAuthToken": true
-        }
-      ]
+  # Python Dockerized Backend
+  - name: servicenow-backend
+    path: backend
+    docker:
+      image: <your-docker-registry>/servicenow-backend:latest
+    memory: 512M
+    env:
+      SN_INSTANCE: "your-instance.service-now.com"
+      SN_USER: "api_user"
+      SN_PASSWORD: "api_password"
